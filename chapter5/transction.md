@@ -29,7 +29,7 @@ innodb를 사용한 테이블에는 3만 존재한다
 **트랜잭션이 필요한 부분만 확인하여 트랜잭션의 범위를 최소화하는 것이 필요하다.**
 
 # 잠금
-## MySQL 엔진의 잠금
+## MySQL 엔진 잠금
 
 MySQL엔진 레벨의 잠금은 모든 스토리지 엔진에 영향을 미친다. 하지만 그 반대의 경우는 아니다 (스토리지 엔진 → MySQL 엔진)
 
@@ -97,7 +97,7 @@ SELECT IS_FREE_LOCK('문자열')
 SELECT RELEASE_LOCK('문자열')
 ```
 
-4️⃣ 메타데이터 락
+4️⃣ [메타데이터 락](https://dev.mysql.com/doc/refman/8.4/en/metadata-locking.html#metadata-lock-acquisition)
 
 > 데이터베이스 객체의 이름이나 구조를 변경하는 경우 획득하는 잠금
 
@@ -108,21 +108,98 @@ SELECT RELEASE_LOCK('문자열')
 ```sql
 RENAME TABLE tbla TO tbld, tblc TO tbla
 ```
-두개의 RENAME작업을 동시에 진행하는 명령어 두개를 비교
+두개의 RENAME작업을 동시에 진행하는 명령어
 
-위 명령어의 잠금 순서: **tbla > tblc > tbld**
+이와 같은 명령어는 "Table not found rank"같은 상황을 발생시키지 않고 적용하는 것이 가능하다
 
-아래 명령어의 잠금 순서: **tbla > tblb > tblc**
+하지만 이 문장을 2개로 나눠서 실행하면 rank 테이블이 존재하지 않는 순간이 생겨 "Table not found rank" 오류를 발생시킨다
 
-```sql
-RENAME TABLE tbla TO tblb, tblc TO tbla
-```
 
-잠금 순서가 다른 이유는 알파벳 순서대로 락을 잡기 때문이다
 
-https://dev.mysql.com/doc/refman/8.4/en/metadata-locking.html#metadata-lock-acquisition
 
-*구조를 변경하는 명령어*
+## InnoDB 스토리지 엔진 잠금
+
+[InnoDB 스토리지 엔진 잠금 종류](https://dev.mysql.com/doc/refman/8.4/en/innodb-locking.html)
+
+스토리지 엔진 내부에서 레코드 기반의 잠금 방식이다
+
+MyISAM보다 뛰어난 동시성 처리를 제공하지만 이원화된 잠금 처리 때문에 MySQL 명령을 이용한 접근이 쉽지 않다
+
+예전 서버에서는 lock_monitor과 SHOW ENGINE INNODB STATUS 명령으로 잠금 정보를 진단했지만 최근 버전에서는
+- 트랜잭션(INNODB_TRX)
+- 잠금(INNODB_LOCKS)
+- 잠금 대기 중인 트랜잭션(INNODB_LOCK_WAITS)
+  
+테이블을 조인해서 조회하면 잠금 상태를 확인할 수 있다.
+
+
+
+1️⃣ 레코드 락
+> 레코드 자체만을 잠금
+
+DBMS 레코드 락과 동일한 역할을 하지만, InnoDB는 레코드자체가 아닌 인덱스의 레코드를 잠근다
+인덱스가 없는 테이블이어도 내부적으로 자동 생성된 클러스터 인덱스를 이용해 잠금을 설정하는데 레코드 자체를 잠그는 것과 인덱스를 잠그는 것에는 중요한 차이가 있다.
+
+InnoDB에서 PRIMARY KEY또는 UNIQUE 인덱스에 의한 변경 작업에서 갭이 아닌 레코드 자체에 대해서만 락을 건다
+
+2️⃣ 갭 락
+> 레코드와 인접한 레코드 사이 간격만을 잠금
+
+갭 락의 역할은 레코드와 레코드 사이의 간격에 새로운 레코드가 생성되는 것을 제어하는 것이다. 갭 락은 그 자체보다 넥스트 키 락의 일부로 자주 사용된다.
+
+
+3️⃣ 넥스트 키 락
+> 레코드 락과 갭 락을 합쳐 놓은 형태의 잠금
+
+STATEMENT 포맷의 바이너리 로그를 사용하는 MySQL 서버에서는 REPEATABLE READ격리 수준을 사용해야 한다.
+
+innodb_locks_unsafe_for_binlog 시스템 변수가 0으로 설정되면 변경을 위해 검색하는 레코드에는 넥스트 키 락 방식으로 잠금이 걸린다. 갭 락과 넥스트 키 락은 바이너리 로그에 기록되는 쿼리가 레플리카 서버에서 실행될 때 소스 서버에서 만들어 낸 결과와 동일한 결과를 만들어내도록 보장하는 것이 주목적이다.
+
+즉, 레플리카 서버에서 쿼리를 실행할 때 데이터 삽입, 변경의 영향을 받지 않고 소스 서버와 동일한 결과를 유지할 수 있다.
+
+그런데 으외로 넥스트 키 락과 갭 락으로 인해 데드락이 발생하거나 다른 트랜잭션을 기다리게 만드는 일이 자주 발생한다. 그래서 바이너리 로그 포맷을 ROW 형태로 바꿔서 넥스트 키 락이나 갭 락을 줄이는 것이 좋다.
+
+4️⃣ 자동 증가 락
+
+MySQL에서는 자동 증가하는 숫자 값을 추출하기 위해 AUTO_INCREMENT라는 칼럼 속성을 제공한다. 이 칼럼이 사용된 테이블에 여러 레코드가 동시에 INSERT되는 경우, 각 레코드는 중복되지 않고 저장된 순서대로 증가하는 일련번호 값을 가져야 한다.
+
+AUTO_INCREMENT 락은 INSERT, REPLACE같은 새로운 레코드를 저장하는 쿼리에서만 필요하다. 다른 잠금과는 달리 트랜잭션과 관계없이 문장에서 AUTO_INCREMENT값을 가져오는 순간만 락이 걸렸다가 즉시 해제된다. 해당 잠금은 테이블에 단 하나만 존재하기 때문에 두 개의 쿼리가 동시에 실행되는 경우 하나의 쿼리가 락을 걸면 나머지 쿼리는 기다려야 한다.
+
+해당 잠금은 명시적으로 획득 및 해제하는 방법이 없고 아주 짧은 시간 지속되는 잠금이기에 대부분의 경우 문제가 되지 않는다.
+
+MySQL 5.1 이상 버전부터 사용되는 innodb_autoinc_lock_mode라는 시스템 변수를 이용해 자동 증가 락의 작동 방식을 변경할 수 있다.
+
+- innodb_autoinc_lock_mode = 0
+
+  🔹 모든 insert 문장이 자동 증가 락을 사용한다
+
+- innodb_autoinc_lock_mode = 1
+
+  🔹INSERT되는 레코드의 건수를 예측할 수 있을 때는 Auto increment lock을 사용하지 않는다
+  
+  🔹가볍고 빠른 래치(뮤텍스)를 이용해 처리하고 이는 자동 증가 락과 달리 짧은 잠금 시간과 필요 자동 증가 값이 있으면 바로 해제됨
+
+  🔹서버가 건수를 예측할 수 없다면 Auto increment lock을 사용한다.
+
+  🔹연속 모드(Consecutive mode)라고도 함
+
+- innodb_autoinc_lock_mode = 2
+
+  🔹절대 자동 증가 락을 걸지 않고 래치(뮤텍스)를 사용한다.
+
+  🔹하나의 INSERT 문장으로 INSERT되는 레코드 라고 하더라도 연속된 자동 증가 값을 보장하지 않음
+
+  🔹인터리빙 모드(Interleaved mode)라고도 함
+
+  🔹대량 INSERT 문장이 실행되는 중에다른 커넥션에서도 INSERT를 사용할 수 있어 동시 처리 성능이 높아짐
+
+  🔹STATEMENT 포맷의 바이너리 로그를 사용하는 복제에서는 소스 서버와 레플리카 서버의 자동 증가 값이 달라질 수 있기에 주의해야 함
+
+
+
+
+
+
 
 
 
