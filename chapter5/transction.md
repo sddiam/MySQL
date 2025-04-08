@@ -103,8 +103,26 @@ SELECT RELEASE_LOCK('문자열')
 
 명시적인 설정과 해제가 불가능하고 이름과 구조 변경 시 자동으로 획득할 수 있다
 
+*이름을 변경하는 명령어*
+
 ```sql
-RENAME TABLE 원래이름 TO 바꾸는이름
+RENAME TABLE tbla TO tbld, tblc TO tbla
 ```
+두개의 RENAME작업을 동시에 진행하는 명령어 두개를 비교
+
+위 명령어의 잠금 순서: **tbla > tblc > tbld**
+
+아래 명령어의 잠금 순서: **tbla > tblb > tblc**
+
+```sql
+RENAME TABLE tbla TO tblb, tblc TO tbla
+```
+
+잠금 순서가 다른 이유는 알파벳 순서대로 락을 잡기 때문이다
+
+https://dev.mysql.com/doc/refman/8.4/en/metadata-locking.html#metadata-lock-acquisition
+
+*구조를 변경하는 명령어*
+
 
 
