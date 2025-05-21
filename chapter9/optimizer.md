@@ -406,11 +406,12 @@ WHERE d.dept_no IN
 ```
 
 ### 9.4.2.5 SUBQUERY
-> 서브쿼리의 셈미 조인 최적화(MATERIALIZATION과 INTOEXISTS) 전략 제어
+> 서브쿼리의 세미 조인 최적화(MATERIALIZATION과 INTOEXISTS) 전략 제어
 
 
 ### 9.4.2.6 BNL & NO_BNL & HASHJOIN & NO_HASHJOIN
 > BNL & NO_BNL : 블록 네스티드 루프 조인(BNL) 사용 여부 제어
+
 > HASHJOIN & NO_HASHJOIN : 해시 조인 사용 여부 제어
 ```sql
 EXPLAIN
@@ -452,6 +453,7 @@ FROM employees e
 
 ### 9.4.2.8 MERGE & NO_MERGE
 > FROM 절의 서브쿼리나 뷰를 외부 쿼리 블록으로 병합하는 최적화를 수행할지 여부 제어
+> 
 > 내부 임시테이블 생성과 내부 쿼리를 외부 쿼리와 병합하는 것을 선택
 ```sql
 --외부 쿼리와 병합
